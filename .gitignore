@@ -1,0 +1,77 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+
+# ── Environnements virtuels ──────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.env.bak
+
+# ── Variables d'environnement ────────────────────────────────────────────────
+.env
+.env.local
+.env.production
+.env.staging
+# Garder l'exemple de config
+!.env.example
+
+# ── Base de données  et alembic ───────────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+dev.db
+alembic.ini
+alembic/versions/
+alembic/versions/*.py
+alembic/versions/*.pyc
+alembic/versions/*.pyo
+alembic/versions/*.pyd
+alembic/versions/__pycache__/
+alembic/__pycache__/
+
+# ── Alembic ──────────────────────────────────────────────────────────────────
+# (versions/ est versionné, mais pas les fichiers temporaires)
+
+# ── Distribution / Build ─────────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+
+# ── Tests & Coverage ─────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.coveragerc
+
+# ── Outils de qualité ────────────────────────────────────────────────────────
+.mypy_cache/
+.ruff_cache/
+.pyright/
+
+# ── IDEs ─────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Fichiers temporaires ─────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.orig
