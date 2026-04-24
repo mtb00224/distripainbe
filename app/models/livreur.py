@@ -1,23 +1,43 @@
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from decimal import Decimal
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+
+class LivreurBoulangerie(Base):
+    """Table de contrat : prix négociés par livreur et par boulangerie."""
+    __tablename__ = "livreur_boulangeries"
+
+    livreur_id: Mapped[int] = mapped_column(
+        ForeignKey("livreurs.id", ondelete="CASCADE"), primary_key=True
+    )
+    boulangerie_id: Mapped[int] = mapped_column(
+        ForeignKey("boulangeries.id", ondelete="CASCADE"), primary_key=True
+    )
+    prix_achat_pain: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    contact_local: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    livreur: Mapped["Livreur"] = relationship("Livreur", back_populates="boulangeries_links")
+    boulangerie: Mapped["Boulangerie"] = relationship(
+        "Boulangerie", back_populates="livreurs_links"
+    )
 
 
 class Livreur(Base):
     __tablename__ = "livreurs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    nom: Mapped[str] = mapped_column(String(100), nullable=False)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    password_hash: Mapped[str] = mapped_column(String, nullable=False)
-    telephone: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    pays_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("pays.id", ondelete="SET NULL"), nullable=True
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
     )
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    # JSON list of allowed permissions — null means all permissions granted (default)
     permissions: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -25,30 +45,120 @@ class Livreur(Base):
         nullable=False,
     )
 
-    # Relationships
-    pays: Mapped["Pays | None"] = relationship("Pays")  # noqa: F821
+    # Compte utilisateur lié
+    user: Mapped["User"] = relationship("User", back_populates="livreur_profile")
 
-    acolytes: Mapped[list["Acolyte"]] = relationship(  # noqa: F821
-        "Acolyte", back_populates="livreur_principal", cascade="all, delete-orphan"
+    # Boulangeries liées (contrats)
+    boulangeries_links: Mapped[list["LivreurBoulangerie"]] = relationship(
+        "LivreurBoulangerie", back_populates="livreur", cascade="all, delete-orphan"
     )
-    boulangeries: Mapped[list["Boulangerie"]] = relationship(  # noqa: F821
-        "Boulangerie", back_populates="livreur", cascade="all, delete-orphan"
+
+    # Acolytes
+    acolytes: Mapped[list["AcolyteLivreur"]] = relationship(
+        "AcolyteLivreur", back_populates="livreur_principal", cascade="all, delete-orphan"
     )
-    zones: Mapped[list["Zone"]] = relationship(  # noqa: F821
+
+    # Relations métier
+    zones: Mapped[list["Zone"]] = relationship(
         "Zone", back_populates="livreur", cascade="all, delete-orphan"
     )
-    clients: Mapped[list["Client"]] = relationship(  # noqa: F821
-        "Client", back_populates="livreur", cascade="all, delete-orphan"
-    )
-    tournees: Mapped[list["Tournee"]] = relationship(  # noqa: F821
+    tournees: Mapped[list["Tournee"]] = relationship(
         "Tournee", back_populates="livreur", cascade="all, delete-orphan"
     )
-    encaissements: Mapped[list["Encaissement"]] = relationship(  # noqa: F821
+    encaissements: Mapped[list["Encaissement"]] = relationship(
         "Encaissement", back_populates="livreur", cascade="all, delete-orphan"
     )
-    portions: Mapped[list["PortionPain"]] = relationship(  # noqa: F821
+    portions: Mapped[list["PortionPain"]] = relationship(
         "PortionPain", back_populates="livreur", cascade="all, delete-orphan"
     )
-    abonnements: Mapped[list["Abonnement"]] = relationship(  # noqa: F821
+    abonnements: Mapped[list["Abonnement"]] = relationship(
         "Abonnement", back_populates="livreur", cascade="all, delete-orphan"
     )
+    clients: Mapped[list["Client"]] = relationship(
+        "Client", back_populates="livreur", cascade="all, delete-orphan"
+    )
+
+    # =====================
+    # Propriétés pratiques (délèguent à User)
+    # =====================
+    @property
+    def first_name(self) -> str:
+        return self.user.first_name if self.user else ""
+
+    @property
+    def last_name(self) -> str:
+        return self.user.last_name if self.user else ""
+
+    @property
+    def nom(self) -> str:
+        """Nom complet — rétrocompatibilité."""
+        return f"{self.first_name} {self.last_name}".strip()
+
+    @property
+    def email(self) -> str | None:
+        return self.user.email if self.user else None
+
+    @property
+    def username(self) -> str:
+        return self.user.username if self.user else ""
+
+    @property
+    def phone_number(self) -> str:
+        return self.user.phone_number if self.user else ""
+
+    @property
+    def is_active(self) -> bool:
+        return self.user.is_active if self.user else False
+
+
+class AcolyteLivreur(Base):
+    __tablename__ = "acolytes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    livreur_principal_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("livreurs.id", ondelete="CASCADE"), nullable=False
+    )
+    permissions: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship("User")
+    livreur_principal: Mapped["Livreur"] = relationship("Livreur", back_populates="acolytes")
+
+    # =====================
+    # Propriétés pratiques
+    # =====================
+    @property
+    def first_name(self) -> str:
+        return self.user.first_name if self.user else ""
+
+    @property
+    def last_name(self) -> str:
+        return self.user.last_name if self.user else ""
+
+    @property
+    def nom(self) -> str:
+        return f"{self.first_name} {self.last_name}".strip()
+
+    @property
+    def email(self) -> str | None:
+        return self.user.email if self.user else None
+
+    @property
+    def username(self) -> str:
+        return self.user.username if self.user else ""
+
+    @property
+    def password_hash(self) -> str:
+        return self.user.password_hash if self.user else ""
+
+    @property
+    def is_default_password(self) -> bool:
+        return self.user.must_change_password if self.user else False

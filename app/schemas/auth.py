@@ -1,22 +1,15 @@
-from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
-from typing import Optional
-
-
-class UpdateProfileRequest(BaseModel):
-    nom: Optional[str] = None
-    telephone: Optional[str] = None
-
-
-class ChangePasswordLivreurRequest(BaseModel):
-    current_password: str
-    new_password: str
+from typing import Literal, Optional
+from pydantic import BaseModel, EmailStr, ConfigDict
 
 
 class RegisterRequest(BaseModel):
-    nom: str
+    role: Literal["livreur", "admin_boulangerie"]
+    first_name: str
+    last_name: str
+    username: str
     email: EmailStr
     password: str
-    telephone: Optional[str] = None
+    phone_number: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -27,48 +20,48 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    user_type: str
+    role: str
     must_change_password: bool = False
+    # Champs spécifiques à admin_boulangerie (None pour les autres rôles)
+    admin_boulangerie_id: Optional[int] = None
+    boulangerie_active_id: Optional[int] = None
 
 
 class RefreshResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-
-
-class PaysInfo(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    nom: str
-    code: str
-    devise_nom: str
-    devise_code: str
+    role: Optional[str] = None
+    admin_boulangerie_id: Optional[int] = None
+    boulangerie_active_id: Optional[int] = None
 
 
 class CurrentUserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    nom: str
-    email: str
-    telephone: Optional[str] = None
-    user_type: str
-    permissions: Optional[list[str]] = None
-    livreur_principal_id: Optional[int] = None
+    first_name: str
+    last_name: str
+    username: str
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    role: str
     is_active: bool
-    pays: Optional[PaysInfo] = None
+    permissions: Optional[list[str]] = None
+    livreur_id: Optional[int] = None
+    livreur_principal_id: Optional[int] = None
+
+
+class UpdateProfileRequest(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone_number: Optional[str] = None
 
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
 
-    @field_validator("new_password")
-    @classmethod
-    def validate_new_password(cls, v: str) -> str:
-        if len(v) < 5 or len(v) > 10:
-            raise ValueError("Le mot de passe doit contenir entre 5 et 10 caractères")
-        if not v.isalnum():
-            raise ValueError("Le mot de passe doit contenir uniquement des chiffres et/ou des lettres")
-        return v
+
+class ChangePasswordLivreurRequest(BaseModel):
+    current_password: str
+    new_password: str

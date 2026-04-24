@@ -1,13 +1,18 @@
 import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
-from app.core.dependencies import get_current_user_context, livreur_only, require_permission
+from app.core.dependencies import get_current_user_context, livreur_only
 from app.core.security import hash_password, verify_password
 from app.crud.acolyte import crud_acolyte
 from app.db.session import get_db
-from app.models.livreur import Livreur
-from app.schemas.acolyte import AcolyteCreate, AcolyteResponse, AcolyteUpdate, AVAILABLE_PERMISSIONS
+from app.models.livreur import Livreur, AcolyteLivreur
+from app.models.user import User
+from app.schemas.acolyte import (
+    AcolyteCreate, AcolyteResponse, AcolyteUpdate, AVAILABLE_PERMISSIONS
+)
 from app.schemas.auth import ChangePasswordRequest
 
 router = APIRouter(prefix="/acolytes", tags=["acolytes"])
@@ -15,21 +20,8 @@ router = APIRouter(prefix="/acolytes", tags=["acolytes"])
 MAX_ACOLYTES = 2
 
 
-def _serialize(acolyte) -> AcolyteResponse:
-    try:
-        perms = json.loads(acolyte.permissions or "[]")
-    except (ValueError, TypeError):
-        perms = []
-    return AcolyteResponse(
-        id=acolyte.id,
-        livreur_principal_id=acolyte.livreur_principal_id,
-        nom=acolyte.nom,
-        email=acolyte.email,
-        permissions=perms,
-        is_default_password=acolyte.is_default_password,
-        is_active=acolyte.is_active,
-        created_at=acolyte.created_at,
-    )
+def _serialize(acolyte: AcolyteLivreur) -> AcolyteResponse:
+    return AcolyteResponse.model_validate(acolyte)
 
 
 @router.get("", response_model=list[AcolyteResponse])
@@ -49,20 +41,28 @@ async def create_acolyte(
 ):
     count = await crud_acolyte.count_by_livreur(db, livreur.id)
     if count >= MAX_ACOLYTES:
-        raise HTTPException(status_code=400, detail=f"Maximum {MAX_ACOLYTES} acolytes autorisés")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum {MAX_ACOLYTES} acolytes autorisés",
+        )
 
-    if await crud_acolyte.get_by_email(db, payload.email):
-        raise HTTPException(status_code=400, detail="Email déjà utilisé")
-
-    invalid = [p for p in payload.permissions if p not in AVAILABLE_PERMISSIONS]
-    if invalid:
-        raise HTTPException(status_code=400, detail=f"Permissions invalides: {invalid}")
+    # Vérifier username/email unique
+    existing_u = await db.execute(select(User).where(User.username == payload.username))
+    if existing_u.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Nom d'utilisateur déjà pris")
+    if payload.email:
+        existing_e = await db.execute(select(User).where(User.email == payload.email))
+        if existing_e.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Email déjà utilisé")
 
     acolyte = await crud_acolyte.create_acolyte(
         db,
         livreur_principal_id=livreur.id,
-        nom=payload.nom,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        username=payload.username,
         email=payload.email,
+        phone_number=payload.phone_number,
         permissions=payload.permissions,
     )
     return _serialize(acolyte)
@@ -98,8 +98,20 @@ async def update_acolyte(
             raise HTTPException(status_code=400, detail=f"Permissions invalides: {invalid}")
         updates["permissions"] = json.dumps(updates["permissions"])
 
-    updated = await crud_acolyte.update(db, db_obj=a, obj_in=updates)
-    return _serialize(updated)
+    if "is_active" in updates:
+        a.is_active = updates["is_active"]
+        db.add(a)
+    if "permissions" in updates:
+        a.permissions = updates["permissions"]
+        db.add(a)
+    await db.commit()
+
+    result = await db.execute(
+        select(AcolyteLivreur)
+        .options(selectinload(AcolyteLivreur.user))
+        .where(AcolyteLivreur.id == a.id)
+    )
+    return _serialize(result.scalar_one())
 
 
 @router.delete("/{acolyte_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -111,7 +123,9 @@ async def delete_acolyte(
     a = await crud_acolyte.get_by_livreur_and_id(db, livreur.id, acolyte_id)
     if not a:
         raise HTTPException(status_code=404, detail="Acolyte introuvable")
-    await crud_acolyte.update(db, db_obj=a, obj_in={"is_active": False})
+    a.is_active = False
+    db.add(a)
+    await db.commit()
 
 
 @router.put("/me/password", status_code=status.HTTP_204_NO_CONTENT)
@@ -124,10 +138,10 @@ async def change_acolyte_password(
     if acolyte is None:
         raise HTTPException(status_code=403, detail="Endpoint réservé aux acolytes")
 
-    if not verify_password(payload.current_password, acolyte.password_hash):
+    if not verify_password(payload.current_password, acolyte.user.password_hash):
         raise HTTPException(status_code=400, detail="Mot de passe actuel incorrect")
 
-    await crud_acolyte.update(db, db_obj=acolyte, obj_in={
-        "password_hash": hash_password(payload.new_password),
-        "is_default_password": False,
-    })
+    acolyte.user.password_hash = hash_password(payload.new_password)
+    acolyte.user.must_change_password = False
+    db.add(acolyte.user)
+    await db.commit()

@@ -1,21 +1,23 @@
 from datetime import datetime
-from typing import Optional
+from decimal import Decimal
+from typing import Optional, List, Dict
 from pydantic import BaseModel, ConfigDict
-from app.schemas.pays import PaysResponse
 
 
-# --- Auth ---
+# --- Auth Admin ---
+
+class AdminSetupRequest(BaseModel):
+    setup_key: str
+    email: str
+    username: str
+    password: str
+    first_name: str
+    last_name: str
+
 
 class AdminLoginRequest(BaseModel):
     email: str
     password: str
-
-
-class AdminSetupRequest(BaseModel):
-    email: str
-    password: str
-    nom: str
-    setup_key: str  # secret key to prevent abuse
 
 
 class AdminTokenResponse(BaseModel):
@@ -23,44 +25,45 @@ class AdminTokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-# --- Platform stats ---
+# --- Statistiques Globales ---
 
 class DeviceBreakdown(BaseModel):
-    mobile: int
-    tablet: int
-    desktop: int
+    mobile: int = 0
+    tablet: int = 0
+    desktop: int = 0
 
 
 class PlatformBreakdown(BaseModel):
-    ios: int
-    android: int
-    windows: int
-    macos: int
-    linux: int
-    other: int
+    ios: int = 0
+    android: int = 0
+    windows: int = 0
+    macos: int = 0
+    linux: int = 0
+    other: int = 0
 
 
 class PlatformStats(BaseModel):
     total_livreurs: int
     active_livreurs: int
+    total_boulangeries: int
     total_tournees: int
     total_clients: int
-    total_encaissements_fcfa: float
     sessions_total: int
     sessions_30d: int
     device_breakdown: DeviceBreakdown
     platform_breakdown: PlatformBreakdown
 
 
-# --- Livreur performance ---
+# --- Performance Livreur ---
 
 class LivreurPerformance(BaseModel):
-    model_config = ConfigDict(from_attributes=False)
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
-    nom: str
-    email: str
-    telephone: Optional[str]
+    first_name: str
+    last_name: str
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
     is_active: bool
     created_at: datetime
     nb_clients: int
@@ -69,46 +72,46 @@ class LivreurPerformance(BaseModel):
     nb_pains_total: int
     revenue_total: float
     revenue_30d: float
-    last_activity: Optional[datetime]
-    last_device: Optional[str]
-    last_platform: Optional[str]
+    last_activity: Optional[datetime] = None
+    last_device: Optional[str] = None
+    last_platform: Optional[str] = None
     nb_acolytes: int
-    pays: Optional[PaysResponse] = None
 
 
 class LivreurDetailStats(BaseModel):
-    model_config = ConfigDict(from_attributes=False)
-
     livreur: LivreurPerformance
-    monthly_revenue: list[dict]  # [{"month": "2026-01", "revenue": 12500}]
+    monthly_revenue: List[Dict]
     device_breakdown: DeviceBreakdown
     platform_breakdown: PlatformBreakdown
-    recent_sessions: list[dict]  # last 10 login sessions
+    recent_sessions: List[Dict]
 
-
-# --- Livreur management ---
 
 class LivreurToggleRequest(BaseModel):
     is_active: bool
 
 
-# --- Traffic ---
+class LivreurPermissionsUpdate(BaseModel):
+    permissions: Optional[list[str]] = None
+
+
+# --- Traffic & Sessions ---
 
 class TrafficEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     logged_in_at: datetime
-    livreur_id: int
-    livreur_nom: str
-    user_type: str            # 'livreur' | 'acolyte'
-    acolyte_nom: Optional[str]
-    ip_address: Optional[str]
+    user_id: int
+    username: str
+    role: str
+    ip_address: Optional[str] = None
     device_type: str
     platform: str
-    browser: str
+    browser: Optional[str] = None
 
 
 class TrafficStats(BaseModel):
     total_sessions: int
     sessions_7d: int
     unique_ips_7d: int
-    sessions_per_day: list[dict]  # [{"date": "2026-03-25", "count": 5}]
+    sessions_per_day: List[Dict]

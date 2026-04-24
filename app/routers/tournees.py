@@ -15,7 +15,7 @@ from app.crud.tournee import crud_tournee
 from app.db.session import get_db
 from app.models.livreur import Livreur
 from app.models.livraison_client import LivraisonClient
-from app.models.retour_boulangerie import RetourBoulangerieLigne
+from app.models.retour_pain import RetourPain as RetourBoulangerieLigne
 from app.schemas.livraison_client import BulkLivraisonsCreate, LivraisonClientResponse, LivraisonClientUpdate
 from app.schemas.tournee import TourneeCreate, TourneeResponse, TourneeUpdate
 from app.services.bilan_service import recalculate_client_solde
@@ -68,17 +68,16 @@ async def create_tournee(
     livreur: Livreur = Depends(require_permission("create_tournees")),
 ):
     _, acolyte = context
-    nb_retournes = max(0, payload.nb_pains_pris - payload.nb_pains_ecoules)
     t = await crud_tournee.create(db, obj_in={
         "livreur_id": livreur.id,
         "boulangerie_id": payload.boulangerie_id,
         "date": payload.date,
         "periode": payload.periode,
         "nb_pains_pris": payload.nb_pains_pris,
-        "nb_pains_ecoules": payload.nb_pains_ecoules,
-        "nb_pains_retournes": nb_retournes,
+        "nb_pains_ecoules": 0,
+        "nb_pains_retournes": 0,
         "notes": payload.notes,
-        "created_by_acolyte_id": acolyte.id if acolyte else None,
+        "created_by_id": acolyte.user_id if acolyte else livreur.user_id,
     })
     return await crud_tournee.get_by_livreur_and_id(db, livreur.id, t.id)
 
@@ -251,6 +250,7 @@ async def set_livraisons(
             nb_pains_retournes=item.nb_pains_retournes,
             prix_unitaire=prix,
             montant_du=montant,
+            created_by_id=livreur.user_id,
         )
         db.add(livraison)
         affected_clients.add(item.client_id)

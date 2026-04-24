@@ -5,7 +5,15 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.base import CRUDBase
+from app.models.retour_pain import RetourPain
 from app.models.tournee import Tournee
+
+
+def _tournee_options():
+    return [
+        selectinload(Tournee.boulangerie),
+        selectinload(Tournee.retour_lignes).selectinload(RetourPain.portion),
+    ]
 
 
 class CRUDTournee(CRUDBase[Tournee]):
@@ -21,7 +29,7 @@ class CRUDTournee(CRUDBase[Tournee]):
     ) -> list[Tournee]:
         stmt = (
             select(Tournee)
-            .options(selectinload(Tournee.boulangerie))
+            .options(*_tournee_options())
             .where(Tournee.livreur_id == livreur_id)
         )
         if date_filter:
@@ -39,7 +47,7 @@ class CRUDTournee(CRUDBase[Tournee]):
     ) -> Optional[Tournee]:
         result = await db.execute(
             select(Tournee)
-            .options(selectinload(Tournee.boulangerie))
+            .options(*_tournee_options())
             .where(Tournee.id == tournee_id, Tournee.livreur_id == livreur_id)
         )
         return result.scalar_one_or_none()

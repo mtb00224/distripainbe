@@ -29,6 +29,7 @@ async def create_portion(
         "livreur_id": livreur.id,
         "nom": payload.nom,
         "prix_fcfa": payload.prix_fcfa,
+        "valeur_unitaire": payload.valeur_unitaire,
     })
     return portion
 

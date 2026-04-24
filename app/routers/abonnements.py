@@ -1,27 +1,25 @@
-"""Subscription management — livreur-facing endpoints.
+"""Gestion des abonnements — endpoints livreur.
 
-GET  /abonnements/formules              — active formulas
-GET  /abonnements/moyens-paiement       — active payment methods (filtered by livreur's pays)
-GET  /abonnements/current               — livreur's current/latest subscription
-POST /abonnements                       — subscribe to a formula
-POST /abonnements/{id}/paiement         — declare a payment
-GET  /abonnements/history               — all past subscriptions
+GET  /abonnements/formules         — Formules actives
+GET  /abonnements/moyens-paiement  — Moyens de paiement disponibles
+GET  /abonnements/current          — Abonnement actuel du livreur
+GET  /abonnements/history          — Historique des abonnements
+POST /abonnements                  — S'abonner à une formule
+POST /abonnements/{id}/paiement    — Déclarer un paiement
 """
 
-from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from datetime import date, timedelta, timezone, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from typing import Optional
 
 from app.core.dependencies import livreur_only
 from app.db.session import get_db
-from app.models.abonnement import Abonnement, FormulaAbonnement, PaiementAbonnement
+from app.models.abonnement import Abonnement, FormulaAbonnement, MoyenPaiement, PaiementAbonnement
 from app.models.livreur import Livreur
-from app.models.moyen_paiement import MoyenPaiement
-from app.models.pays import Pays
 from app.schemas.abonnement import (
     AbonnementCreate,
     AbonnementResponse,
@@ -34,33 +32,26 @@ from app.schemas.moyen_paiement import MoyenPaiementResponse
 router = APIRouter(prefix="/abonnements", tags=["abonnements"])
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _build_paiement(p: PaiementAbonnement, livreur_nom: str) -> PaiementAbonnementResponse:
+def _build_paiement(p: PaiementAbonnement) -> PaiementAbonnementResponse:
     return PaiementAbonnementResponse(
         id=p.id,
         abonnement_id=p.abonnement_id,
-        livreur_id=p.livreur_id,
-        livreur_nom=livreur_nom,
-        montant=float(p.montant),
-        moyen=p.moyen,
+        montant=p.montant,
         reference=p.reference,
         statut=p.statut,
-        notes_admin=p.notes_admin,
         date_paiement=p.date_paiement,
-        date_validation=p.date_validation,
-        created_at=p.created_at,
+        valide_par_id=p.valide_par_id,
     )
 
 
-def _build_abonnement(a: Abonnement, livreur_nom: str) -> AbonnementResponse:
+def _build_abonnement(a: Abonnement) -> AbonnementResponse:
     formule = FormulaAbonnementResponse(
         id=a.formule.id,
         nom=a.formule.nom,
+        cible=a.formule.cible,
         duree_mois=a.formule.duree_mois,
         prix=float(a.formule.prix),
+        max_boulangeries=a.formule.max_boulangeries,
         description=a.formule.description,
         is_active=a.formule.is_active,
         created_at=a.formule.created_at,
@@ -68,89 +59,54 @@ def _build_abonnement(a: Abonnement, livreur_nom: str) -> AbonnementResponse:
     return AbonnementResponse(
         id=a.id,
         livreur_id=a.livreur_id,
-        livreur_nom=livreur_nom,
+        boulangerie_id=a.boulangerie_id,
         formule_id=a.formule_id,
         formule=formule,
         date_debut=a.date_debut,
         date_fin=a.date_fin,
         statut=a.statut,
         created_at=a.created_at,
-        paiements=[_build_paiement(p, livreur_nom) for p in a.paiements],
+        paiements=[_build_paiement(p) for p in a.paiements],
     )
 
-
-# ---------------------------------------------------------------------------
-# Formulas (public within livreur context)
-# ---------------------------------------------------------------------------
 
 @router.get("/formules", response_model=list[FormulaAbonnementResponse])
 async def list_formules(
     livreur: Livreur = Depends(livreur_only()),
     db: AsyncSession = Depends(get_db),
 ):
-    """Returns active formulas matching the livreur's pays, plus global formulas (pays_id=null)."""
-    from sqlalchemy import or_
     result = await db.execute(
         select(FormulaAbonnement)
-        .options(selectinload(FormulaAbonnement.pays))
-        .where(
-            FormulaAbonnement.is_active == True,
-            or_(
-                FormulaAbonnement.pays_id == None,
-                FormulaAbonnement.pays_id == livreur.pays_id,
-            ),
-        )
+        .where(FormulaAbonnement.is_active == True)
         .order_by(FormulaAbonnement.duree_mois)
     )
-    return result.scalars().all()
+    formules = result.scalars().all()
+    return [
+        FormulaAbonnementResponse(
+            id=f.id,
+            nom=f.nom,
+            cible=f.cible,
+            duree_mois=f.duree_mois,
+            prix=float(f.prix),
+            max_boulangeries=f.max_boulangeries,
+            description=f.description,
+            is_active=f.is_active,
+            created_at=f.created_at,
+        )
+        for f in formules
+    ]
 
-
-# ---------------------------------------------------------------------------
-# Pays (active countries — used by client form)
-# ---------------------------------------------------------------------------
-
-@router.get("/pays", response_model=list)
-async def list_pays_actifs(
-    livreur: Livreur = Depends(livreur_only()),
-    db: AsyncSession = Depends(get_db),
-):
-    from app.schemas.pays import PaysResponse
-    result = await db.execute(
-        select(Pays).where(Pays.is_active == True).order_by(Pays.nom)
-    )
-    pays_list = result.scalars().all()
-    return [PaysResponse.model_validate(p) for p in pays_list]
-
-
-# ---------------------------------------------------------------------------
-# Payment methods
-# ---------------------------------------------------------------------------
 
 @router.get("/moyens-paiement", response_model=list[MoyenPaiementResponse])
 async def list_moyens_paiement(
     livreur: Livreur = Depends(livreur_only()),
     db: AsyncSession = Depends(get_db),
 ):
-    """Returns active payment methods filtered by livreur's pays (+ global methods with pays_id=null).
-    If the livreur has no pays assigned, returns all active methods."""
-    from sqlalchemy import or_
-    conditions = [MoyenPaiement.is_active == True]
-    if livreur.pays_id is not None:
-        conditions.append(
-            or_(MoyenPaiement.pays_id == None, MoyenPaiement.pays_id == livreur.pays_id)
-        )
     result = await db.execute(
-        select(MoyenPaiement)
-        .options(selectinload(MoyenPaiement.pays))
-        .where(*conditions)
-        .order_by(MoyenPaiement.pays_id.nullslast(), MoyenPaiement.nom)
+        select(MoyenPaiement).where(MoyenPaiement.is_active == True).order_by(MoyenPaiement.nom)
     )
     return result.scalars().all()
 
-
-# ---------------------------------------------------------------------------
-# Current subscription
-# ---------------------------------------------------------------------------
 
 @router.get("/current", response_model=Optional[AbonnementResponse])
 async def get_current_abonnement(
@@ -159,23 +115,14 @@ async def get_current_abonnement(
 ):
     result = await db.execute(
         select(Abonnement)
-        .options(
-            selectinload(Abonnement.formule),
-            selectinload(Abonnement.paiements),
-        )
+        .options(selectinload(Abonnement.formule), selectinload(Abonnement.paiements))
         .where(Abonnement.livreur_id == livreur.id)
         .order_by(Abonnement.created_at.desc())
         .limit(1)
     )
     abonnement = result.scalar_one_or_none()
-    if not abonnement:
-        return None
-    return _build_abonnement(abonnement, livreur.nom)
+    return _build_abonnement(abonnement) if abonnement else None
 
-
-# ---------------------------------------------------------------------------
-# History
-# ---------------------------------------------------------------------------
 
 @router.get("/history", response_model=list[AbonnementResponse])
 async def get_abonnement_history(
@@ -184,20 +131,12 @@ async def get_abonnement_history(
 ):
     result = await db.execute(
         select(Abonnement)
-        .options(
-            selectinload(Abonnement.formule),
-            selectinload(Abonnement.paiements),
-        )
+        .options(selectinload(Abonnement.formule), selectinload(Abonnement.paiements))
         .where(Abonnement.livreur_id == livreur.id)
         .order_by(Abonnement.created_at.desc())
     )
-    abonnements = result.scalars().all()
-    return [_build_abonnement(a, livreur.nom) for a in abonnements]
+    return [_build_abonnement(a) for a in result.scalars().all()]
 
-
-# ---------------------------------------------------------------------------
-# Subscribe
-# ---------------------------------------------------------------------------
 
 @router.post("", response_model=AbonnementResponse, status_code=status.HTTP_201_CREATED)
 async def create_abonnement(
@@ -209,35 +148,32 @@ async def create_abonnement(
     if not formule or not formule.is_active:
         raise HTTPException(status_code=404, detail="Formule introuvable ou inactive")
 
-    date_fin = payload.date_debut + timedelta(days=formule.duree_mois * 30)
+    date_debut = payload.date_debut or date.today()
+    date_fin = date_debut + timedelta(days=formule.duree_mois * 30)
 
     abonnement = Abonnement(
         livreur_id=livreur.id,
         formule_id=formule.id,
-        date_debut=payload.date_debut,
+        date_debut=date_debut,
         date_fin=date_fin,
         statut="en_attente",
     )
     db.add(abonnement)
     await db.commit()
-    await db.refresh(abonnement)
 
     result = await db.execute(
         select(Abonnement)
         .options(selectinload(Abonnement.formule), selectinload(Abonnement.paiements))
         .where(Abonnement.id == abonnement.id)
     )
-    abonnement = result.scalar_one()
-    return _build_abonnement(abonnement, livreur.nom)
+    return _build_abonnement(result.scalar_one())
 
 
-# ---------------------------------------------------------------------------
-# Declare a payment
-# ---------------------------------------------------------------------------
-
-@router.post("/{abonnement_id}/paiement",
-             response_model=PaiementAbonnementResponse,
-             status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{abonnement_id}/paiement",
+    response_model=PaiementAbonnementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def declare_paiement(
     abonnement_id: int,
     payload: PaiementAbonnementCreate,
@@ -253,18 +189,16 @@ async def declare_paiement(
     abonnement = result.scalar_one_or_none()
     if not abonnement:
         raise HTTPException(status_code=404, detail="Abonnement introuvable")
-    if abonnement.statut == "expire":
+    if abonnement.statut.value == "expire":
         raise HTTPException(status_code=400, detail="Abonnement expiré")
 
     paiement = PaiementAbonnement(
         abonnement_id=abonnement_id,
-        livreur_id=livreur.id,
         montant=payload.montant,
-        moyen=payload.moyen,
         reference=payload.reference,
         statut="en_attente",
     )
     db.add(paiement)
     await db.commit()
     await db.refresh(paiement)
-    return _build_paiement(paiement, livreur.nom)
+    return _build_paiement(paiement)

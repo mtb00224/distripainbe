@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import require_permission
+from app.core.dependencies import get_current_acolyte_context, require_permission
 from app.crud.client import crud_client
 from app.db.session import get_db
 from app.models.livreur import Livreur
@@ -27,15 +27,18 @@ async def list_clients(
 @router.post("", response_model=ClientResponse, status_code=status.HTTP_201_CREATED)
 async def create_client(
     payload: ClientCreate,
+    context=Depends(get_current_acolyte_context),
     db: AsyncSession = Depends(get_db),
     livreur: Livreur = Depends(require_permission("write_clients")),
 ):
+    _, acolyte = context
     client = await crud_client.create(db, obj_in={
         "livreur_id": livreur.id,
         "zone_id": payload.zone_id,
         "nom": payload.nom,
         "telephone": payload.telephone,
         "prix_vente_pain": payload.prix_vente_pain,
+        "created_by_id": acolyte.user_id if acolyte else livreur.user_id,
     })
     return await crud_client.get_by_livreur_and_id(db, livreur.id, client.id)
 
