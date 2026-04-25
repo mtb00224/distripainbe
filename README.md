@@ -171,3 +171,5 @@ app/
 | GET | /admin/abonnements | Liste abonnements + validation paiements |
 | GET/POST | /admin/moyens-paiement | CRUD moyens de paiement |
 | GET | /admin/traffic | Journal des connexions |
+
+Un changement sur l'état actuelle
